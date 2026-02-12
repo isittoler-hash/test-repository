@@ -4,28 +4,38 @@
 using namespace vex;
 
 namespace {
+// ---- Physical + control constants -------------------------------------------------
+// Wheel diameter and effective track width are the most important calibration values
+// for encoder-only dead reckoning. Re-tune these first when distances/turns drift.
 constexpr double kWheelDiameterMm = 82.55;   // 3.25" omni estimate; tune on field.
 constexpr double kTrackWidthMm = 285.0;      // center-to-center wheel track; tune on robot.
+
+// Minimum command floors to overcome static friction at low errors.
 constexpr double kMinDrivePct = 14.0;
 constexpr double kMinTurnPct = 12.0;
 
+// Anti-jam heuristic thresholds.
 constexpr double kJamVelocityThresholdRpm = 10.0;
 constexpr double kJamCurrentThresholdAmp = 2.0;
 constexpr int kJamDetectMs = 260;
 constexpr int kUnjamReverseMs = 220;
 
+// Proportional gains for distance/turn and side-to-side synchronization.
 constexpr double kDriveKp = 0.12;
 constexpr double kTurnKp = 0.24;
 constexpr double kSyncKp = 0.08;
 
+// Utility clamp for scalar values.
 double clamp(double v, double lo, double hi) {
   return (v < lo) ? lo : ((v > hi) ? hi : v);
 }
 
+// Returns +1 for non-negative values and -1 for negative values.
 double sign(double v) {
   return (v >= 0.0) ? 1.0 : -1.0;
 }
 
+// Commands both motors on each drive side in percent output.
 void setDrivePct(double left, double right) {
   FrontLeft.spin(fwd, left, pct);
   BackLeft.spin(fwd, left, pct);
@@ -33,6 +43,7 @@ void setDrivePct(double left, double right) {
   BackRight.spin(fwd, right, pct);
 }
 
+// Stops all drive motors with the provided stopping mode.
 void stopDrive(brakeType mode = brakeType::brake) {
   FrontLeft.stop(mode);
   BackLeft.stop(mode);
@@ -40,6 +51,7 @@ void stopDrive(brakeType mode = brakeType::brake) {
   BackRight.stop(mode);
 }
 
+// Converts linear travel in mm to wheel rotation in motor degrees.
 double mmToWheelDeg(double mm) {
   const double wheelCircMm = kWheelDiameterMm * 3.14159265358979323846;
   return (mm / wheelCircMm) * 360.0;
@@ -49,6 +61,7 @@ double mmToWheelDeg(double mm) {
 void ConveyorController::applyMode(ConveyorMode mode, double pct_cmd) {
   const double pct_out = clamp(pct_cmd, 0.0, 100.0);
 
+  // Each mode controls the full conveyor stack as a coordinated unit.
   switch (mode) {
     case ConveyorMode::Off:
       BottomIntake.stop(coast);
@@ -65,6 +78,7 @@ void ConveyorController::applyMode(ConveyorMode mode, double pct_cmd) {
       break;
 
     case ConveyorMode::ScoreHigh:
+      // For this robot, high-goal scoring uses the same directional flow as collect.
       BottomIntake.spin(fwd, pct_out, pct);
       MiddleIntake.spin(fwd, pct_out, pct);
       TopIntake1.spin(fwd, pct_out, pct);
@@ -72,7 +86,8 @@ void ConveyorController::applyMode(ConveyorMode mode, double pct_cmd) {
       break;
 
     case ConveyorMode::ScoreMiddle:
-      // Keep lower chain feeding while top runs downward to middle output lane.
+      // Middle-goal release keeps the lower stages feeding upward while reversing the
+      // top stage to route game objects into the middle exit path.
       BottomIntake.spin(fwd, pct_out * 0.75, pct);
       MiddleIntake.spin(fwd, pct_out * 0.75, pct);
       TopIntake1.spin(reverse, pct_out, pct);
@@ -90,15 +105,20 @@ void ConveyorController::applyMode(ConveyorMode mode, double pct_cmd) {
 
 void ConveyorController::setMode(ConveyorMode mode, double pct) {
   const double clampedPct = clamp(pct, 0.0, 100.0);
+
+  // Skip re-apply if effective command is unchanged.
   if (mode == mode_ && fabs(clampedPct - cmdPct_) < 0.01) {
     return;
   }
 
   mode_ = mode;
   cmdPct_ = clampedPct;
+
+  // Reset anti-jam state whenever the operator or autonomous changes mode.
   antiJamActive_ = false;
   jamTimer_.clear();
   unjamTimer_.clear();
+
   applyMode(mode_, cmdPct_);
 }
 
@@ -107,6 +127,7 @@ void ConveyorController::stop() {
 }
 
 void ConveyorController::updateAntiJam() {
+  // Anti-jam is intentionally disabled in off/reverse/middle modes.
   if (mode_ == ConveyorMode::Off || mode_ == ConveyorMode::ReversePurge ||
       mode_ == ConveyorMode::ScoreMiddle) {
     return;
@@ -116,18 +137,24 @@ void ConveyorController::updateAntiJam() {
   const double bottomCurrent = BottomIntake.current(currentUnits::amp);
 
   if (!antiJamActive_) {
+    // Jam signature: low velocity + high current sustained for threshold duration.
     if (bottomRpm < kJamVelocityThresholdRpm && bottomCurrent > kJamCurrentThresholdAmp) {
       if (jamTimer_.time(msec) > kJamDetectMs) {
         antiJamActive_ = true;
         unjamTimer_.clear();
+
+        // Brief reverse pulse to clear the obstruction.
         applyMode(ConveyorMode::ReversePurge, 58.0);
       }
     } else {
+      // Condition recovered; restart detection timer.
       jamTimer_.clear();
     }
   } else if (unjamTimer_.time(msec) > kUnjamReverseMs) {
     antiJamActive_ = false;
     jamTimer_.clear();
+
+    // Resume original user/autonomous command.
     applyMode(mode_, cmdPct_);
   }
 }
@@ -158,13 +185,16 @@ void driveDistanceMm(double mm, double max_pct, int timeout_ms) {
     const double rightPos = rightDriveDeg();
     const double avgPos = (leftPos + rightPos) * 0.5;
 
+    // Position error in wheel degrees.
     const double error = targetDeg - avgPos;
     if (fabs(error) < 8.0) {
       break;
     }
 
+    // Synchronization correction: positive means left is ahead of right.
     const double sync = (leftPos - rightPos) * kSyncKp;
 
+    // P-only speed control with saturation and minimum-output floor.
     double cmd = error * kDriveKp;
     cmd = clamp(cmd, -max_pct, max_pct);
     if (fabs(cmd) < kMinDrivePct) {
@@ -181,12 +211,14 @@ void driveDistanceMm(double mm, double max_pct, int timeout_ms) {
 void turnRobotDeg(double deg, double max_pct, int timeout_ms) {
   resetDriveEncoders();
 
+  // Convert desired robot heading change into wheel arc distance per side.
   const double arcMm = (3.14159265358979323846 * kTrackWidthMm) * (fabs(deg) / 360.0);
   const double targetWheelDeg = mmToWheelDeg(arcMm);
   const double dir = sign(deg);
 
   timer t;
   while (t.time(msec) < timeout_ms) {
+    // Turning loop uses absolute wheel travel from both sides.
     const double leftPos = fabs(leftDriveDeg());
     const double rightPos = fabs(rightDriveDeg());
     const double avg = (leftPos + rightPos) * 0.5;
@@ -199,6 +231,7 @@ void turnRobotDeg(double deg, double max_pct, int timeout_ms) {
     double cmd = error * kTurnKp;
     cmd = clamp(cmd, kMinTurnPct, max_pct);
 
+    // Opposing signs create in-place turn.
     setDrivePct(dir * cmd, -dir * cmd);
     task::sleep(10);
   }
@@ -207,6 +240,7 @@ void turnRobotDeg(double deg, double max_pct, int timeout_ms) {
 }
 
 void holdDrive(int hold_ms) {
+  // Short hold to reduce coast/roll before scoring action.
   stopDrive(brakeType::hold);
   task::sleep(hold_ms);
   stopDrive(brakeType::brake);
@@ -219,6 +253,7 @@ void collectWhileDriving(ConveyorController& conveyor, double mm, double speed_p
   const double targetDeg = mmToWheelDeg(mm);
   timer t;
 
+  // Time-bounded integrated move: intake while driving to next pickup line.
   while (t.time(msec) < 2600) {
     const double leftPos = leftDriveDeg();
     const double rightPos = rightDriveDeg();
@@ -236,6 +271,8 @@ void collectWhileDriving(ConveyorController& conveyor, double mm, double speed_p
     }
 
     setDrivePct(cmd - sync, cmd + sync);
+
+    // Keep jam protection active during heavy intake phases.
     conveyor.updateAntiJam();
     task::sleep(10);
   }
