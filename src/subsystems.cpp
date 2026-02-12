@@ -89,8 +89,13 @@ void ConveyorController::applyMode(ConveyorMode mode, double pct_cmd) {
 }
 
 void ConveyorController::setMode(ConveyorMode mode, double pct) {
+  const double clampedPct = clamp(pct, 0.0, 100.0);
+  if (mode == mode_ && fabs(clampedPct - cmdPct_) < 0.01) {
+    return;
+  }
+
   mode_ = mode;
-  cmdPct_ = clamp(pct, 0.0, 100.0);
+  cmdPct_ = clampedPct;
   antiJamActive_ = false;
   jamTimer_.clear();
   unjamTimer_.clear();
@@ -108,7 +113,7 @@ void ConveyorController::updateAntiJam() {
   }
 
   const double bottomRpm = fabs(BottomIntake.velocity(rpm));
-  const double bottomCurrent = BottomIntake.current();
+  const double bottomCurrent = BottomIntake.current(currentUnits::amp);
 
   if (!antiJamActive_) {
     if (bottomRpm < kJamVelocityThresholdRpm && bottomCurrent > kJamCurrentThresholdAmp) {
