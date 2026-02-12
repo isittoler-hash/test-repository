@@ -45,6 +45,14 @@ For a deeper walkthrough, see:
 
 Because this is encoder-only dead reckoning, field slip/contact will introduce drift. The route is expected to be iteratively tuned.
 
+## VS Code VEX extension compatibility
+
+This repository now includes the common VEX project metadata expected by the VS Code VEX extension:
+- `include/vex.h` umbrella header
+- `.vscode/vex_project_settings.json` project descriptor
+
+If the extension still does not recognize the project, use the extension command to reopen/import the current folder as a V5 C++ project.
+
 ## Files
 
 - `src/robot-config.cpp`: robot ports, inversion, and stopping mode setup.
