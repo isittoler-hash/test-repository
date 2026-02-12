@@ -4,6 +4,11 @@ using namespace vex;
 
 // 1-minute autonomous route, wheel-feedback only.
 // Start assumption: red side, facing centerline.
+//
+// Route philosophy:
+// - Alternate between pickup sweeps and scoring opportunities.
+// - Use composite helpers to keep route readable and tunable.
+// - End with a deterministic parking push.
 void runAutonomousSkills() {
   ConveyorController conveyor;
 
@@ -13,7 +18,8 @@ void runAutonomousSkills() {
   driveDistanceMm(360, 42);
   scoreHighGoalCycle(conveyor, 520);
 
-  // --- Cycle 2: pull out, collect center cluster -> score middle goal (top runs downward) ---
+  // --- Cycle 2: pull out, collect center cluster -> score middle goal ---
+  // Middle cycle uses top-stage reverse to route toward middle release.
   driveDistanceMm(-250, 50);
   turnRobotDeg(-82, 55);
   collectWhileDriving(conveyor, 980, 70);
