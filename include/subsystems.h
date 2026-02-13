@@ -1,6 +1,6 @@
 #pragma once
 
-#include "robot-config.h"
+#include "vex.h"
 
 // High-level conveyor operating modes used by both autonomous and driver control.
 enum class ConveyorMode {
