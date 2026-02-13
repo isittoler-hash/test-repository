@@ -53,6 +53,25 @@ This repository now includes the common VEX project metadata expected by the VS 
 
 If the extension still does not recognize the project, use the extension command to reopen/import the current folder as a V5 C++ project.
 
+
+## Build/download error troubleshooting (VEX VS Code extension)
+
+If you see an error like:
+
+```
+Build Failed: make.exe utility does not exist
+make: *** No targets specified and no makefile found.
+```
+
+use this checklist:
+
+1. Confirm this project has a root-level `makefile` (this repo now includes one).
+2. In VS Code, run **VEX: Install Project Utility** to reinstall the extension-provided build tools (including `make.exe`).
+3. Run **VEX: Select a VEX Platform** and make sure it is set to **V5** for this project.
+4. Rebuild with **VEX: Build** and then retry **VEX: Download**.
+
+If `make.exe` is still missing after step 2, reinstall the VEX extension and restart VS Code.
+
 ## Files
 
 - `src/robot-config.cpp`: robot ports, inversion, and stopping mode setup.
