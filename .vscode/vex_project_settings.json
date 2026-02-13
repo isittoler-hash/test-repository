@@ -1,8 +1,8 @@
 {
-  "project": {
-    "name": "test-repository",
-    "description": "VEX V5 autonomous codebase (wheel-feedback only)",
-    "platform": "V5",
-    "language": "cpp"
-  }
+	"project": {
+		"name": "test-repository",
+		"description": "VEX V5 autonomous codebase (wheel-feedback only)",
+		"platform": "V5",
+		"language": "cpp"
+	}
 }
